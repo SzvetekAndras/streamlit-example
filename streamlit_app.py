@@ -1,40 +1,57 @@
-import altair as alt
-import numpy as np
-import pandas as pd
 import streamlit as st
+import os
+from langchain_openai import AzureOpenAIEmbeddings
+from langchain_community.document_loaders import DataFrameLoader
+import pandas as pd
+from langchain_community.vectorstores import Chroma
+import pandas as pd
+import re
+os.environ["AZURE_OPENAI_ENDPOINT"] = "https://ae-oa-d-we-004.openai.azure.com/"
+os.environ["AZURE_OPENAI_API_KEY"] = "7d38d7a887484ee4b289d0b65e0b31a5"
 
-"""
-# Welcome to Streamlit!
 
-Edit `/streamlit_app.py` to customize this app to your heart's desire :heart:.
-If you have any questions, checkout our [documentation](https://docs.streamlit.io) and [community
-forums](https://discuss.streamlit.io).
+    
+def get_vectorstore(embeddings, documents=None, persist_path=None):
+    if persist_path is not None and os.path.exists(persist_path):
+        return Chroma(persist_directory=persist_path, embedding_function=embeddings)
+    else:
+        return Chroma.from_documents(documents, embeddings, persist_directory=persist_path)
 
-In the meantime, below is an example of what you can do with just a few lines of code:
-"""
+def search(vectorstore, query, top_k=5):
+    results = vectorstore.similarity_search_with_score(query, k=top_k)
+    df = pd.DataFrame(results, columns=["Document", "Score"])
+   # df["Document"] = df["Document"].str.replace(r"page_content='nan' metadata={", "\n")
+    return df.to_string(index=False)
+    
+if __name__ == "__main__":
 
-num_points = st.slider("Number of points in spiral", 1, 10000, 1100)
-num_turns = st.slider("Number of turns in spiral", 1, 300, 31)
+    #text-embedding-ada-002
+    embeddings = AzureOpenAIEmbeddings(
+    azure_deployment="me-emb-ada-002",
+)
+    
+    vectorstore = Chroma(persist_directory='./vectorstore', embedding_function=embeddings)
+    st.title("Requirement Searchbot")
 
-indices = np.linspace(0, 1, num_points)
-theta = 2 * np.pi * num_turns * indices
-radius = indices
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-x = radius * np.cos(theta)
-y = radius * np.sin(theta)
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-df = pd.DataFrame({
-    "x": x,
-    "y": y,
-    "idx": indices,
-    "rand": np.random.randn(num_points),
-})
-
-st.altair_chart(alt.Chart(df, height=700, width=700)
-    .mark_point(filled=True)
-    .encode(
-        x=alt.X("x", axis=None),
-        y=alt.Y("y", axis=None),
-        color=alt.Color("idx", legend=None, scale=alt.Scale()),
-        size=alt.Size("rand", legend=None, scale=alt.Scale(range=[1, 150])),
-    ))
+# React to user input
+if prompt := st.chat_input("What is up?"):
+    # Display user message in chat message container
+    st.chat_message("user").markdown(prompt)
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    response = search(vectorstore, prompt)
+    # Display assistant response in chat message container
+    with st.chat_message("assistant"):
+        st.markdown(response)
+    # Add assistant response to chat history
+    st.session_state.messages.append({"role": "assistant", "content": response})
